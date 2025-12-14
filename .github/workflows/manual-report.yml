@@ -49,6 +49,9 @@ jobs:
           uv run playwright install-deps chromium
       
       - name: 生成日报
+        env:
+          WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+          NOTIFICATION_ENABLED: ${{ secrets.WECHAT_WEBHOOK_URL != '' && 'true' || 'false' }}
         run: |
           case "${{ inputs.source }}" in
             both)

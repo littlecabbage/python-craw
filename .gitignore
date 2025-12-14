@@ -9,3 +9,6 @@ wheels/
 # Virtual environments
 .venv
 reports/
+
+# 配置文件（包含敏感信息）
+config.json

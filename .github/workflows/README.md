@@ -43,12 +43,39 @@
 2. 在 "Artifacts" 部分下载生成的报告文件
 3. 如果启用了自动提交，报告也会出现在 `reports/` 目录中
 
+## 企业微信推送配置
+
+两个工作流都支持企业微信推送功能。配置方法：
+
+1. **获取 Webhook URL**：
+   - 在企业微信群中添加"群机器人"
+   - 获取 Webhook URL，格式：`https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY`
+
+2. **配置 GitHub Secret**：
+   - 进入仓库 Settings → Secrets and variables → Actions
+   - 点击 "New repository secret"
+   - Name: `WECHAT_WEBHOOK_URL`
+   - Secret: 你的 Webhook URL
+   - 点击 "Add secret"
+
+3. **自动启用推送**：
+   - 配置了 `WECHAT_WEBHOOK_URL` 后，工作流会自动启用通知功能
+   - 如果未配置，通知功能会自动禁用，不影响日报生成
+
+**推送内容：**
+- 报告类型（Zread 或 GitHub）
+- 生成时间
+- 项目总数
+- 报告文件预览
+- 报告文件路径
+
 ## 注意事项
 
 1. **首次运行**：首次运行需要下载 Playwright 浏览器，可能需要较长时间
 2. **网络连接**：需要稳定的网络连接来访问 GitHub 和 Zread
 3. **超时设置**：工作流设置了 30 分钟超时，如果超时请检查网络或脚本执行情况
 4. **权限要求**：如果启用自动提交，需要确保 GitHub Token 有写入权限
+5. **企业微信推送**：推送功能为可选功能，未配置 Webhook URL 时不会影响日报生成
 
 ## 自定义配置
 

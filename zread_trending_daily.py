@@ -5,6 +5,7 @@ Zread Trending 日报生成器
 """
 
 import asyncio
+import os
 from datetime import datetime
 from pathlib import Path
 from playwright.async_api import async_playwright
@@ -13,6 +14,17 @@ from deep_translator import GoogleTranslator
 import requests
 from tqdm import tqdm
 from jinja2 import Environment, FileSystemLoader
+from typing import Optional
+
+# 导入配置和通知模块
+try:
+    from config import Config, load_config
+    from notifiers import WeChatNotifier
+except ImportError:
+    # 兼容旧版本
+    Config = None
+    load_config = None
+    WeChatNotifier = None
 
 
 async def fetch_trending_content(browser=None):
@@ -456,8 +468,14 @@ def generate_daily_report(trending_data, output_file=None, format='markdown', so
     return report_content
 
 
-async def main():
-    """Zread Trending 日报生成主函数（可被导入）"""
+async def generate_zread_report(config: Optional[Config] = None):
+    """Zread Trending 日报生成函数（可被导入）"""
+    if config is None:
+        if Config is not None and load_config is not None:
+            config = load_config()
+        else:
+            config = None
+    
     try:
         # 初始化浏览器
         async with async_playwright() as p:
@@ -543,9 +561,23 @@ async def main():
             # 关闭浏览器
             await browser.close()
         
-        # 生成日报（在浏览器关闭后，同时生成 Markdown 和 HTML）
+        # 生成日报（根据配置生成指定格式）
         print("\n正在生成日报...")
-        reports_dir = Path("reports")
+        # 使用传入的配置，如果没有则尝试加载
+        if config is None:
+            if Config is not None and load_config is not None:
+                config = load_config()
+            else:
+                config = None
+        
+        if config:
+            reports_dir = Path(config.report.output_dir)
+            report_formats = config.report.formats
+        else:
+            reports_dir = Path("reports")
+            report_formats = ['markdown', 'html']
+        
+        reports_dir.mkdir(exist_ok=True)
         templates_dir = Path("templates")
         templates_dir.mkdir(exist_ok=True)
         
@@ -563,34 +595,83 @@ async def main():
             'projects': trending_data
         }
         
-        # 生成 Markdown 格式
-        md_template = env.get_template("report.md.j2")
-        md_content = md_template.render(**template_data)
-        md_file = reports_dir / f"zread_trending_report_{datetime.now().strftime('%Y%m%d')}.md"
-        with open(md_file, 'w', encoding='utf-8') as f:
-            f.write(md_content)
-        print(f"  ✓ Markdown 格式: {md_file}")
+        md_file = None
+        report_content = None
         
-        # 生成 HTML 格式
-        html_template = env.get_template("report.html.j2")
-        html_content = html_template.render(**template_data)
-        html_file = reports_dir / f"zread_trending_report_{datetime.now().strftime('%Y%m%d')}.html"
-        with open(html_file, 'w', encoding='utf-8') as f:
-            f.write(html_content)
-        print(f"  ✓ HTML 格式: {html_file}")
+        # 根据配置生成报告格式
+        if 'markdown' in report_formats:
+            md_template = env.get_template("report.md.j2")
+            md_content = md_template.render(**template_data)
+            md_file = reports_dir / f"zread_trending_report_{datetime.now().strftime('%Y%m%d')}.md"
+            with open(md_file, 'w', encoding='utf-8') as f:
+                f.write(md_content)
+            print(f"  ✓ Markdown 格式: {md_file}")
+            report_content = md_content
         
-        report_content = md_content
+        if 'html' in report_formats:
+            html_template = env.get_template("report.html.j2")
+            html_content = html_template.render(**template_data)
+            html_file = reports_dir / f"zread_trending_report_{datetime.now().strftime('%Y%m%d')}.html"
+            with open(html_file, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            print(f"  ✓ HTML 格式: {html_file}")
         
         # 打印摘要
-        print("\n" + "="*50)
-        print("日报摘要:")
-        print("="*50)
-        print(report_content[:500] + "..." if len(report_content) > 500 else report_content)
+        if report_content:
+            print("\n" + "="*50)
+            print("日报摘要:")
+            print("="*50)
+            print(report_content[:500] + "..." if len(report_content) > 500 else report_content)
+        
+        # 发送通知（如果启用）
+        if config and config.notification.enabled and config.notification.wechat_webhook_url and md_file:
+            try:
+                notifier = WeChatNotifier(config.notification.wechat_webhook_url)
+                success = notifier.send_report_summary(
+                    report_type="Zread",
+                    report_path=md_file,
+                    total_projects=len(trending_data),
+                    generate_time=template_data['generate_time']
+                )
+                if success:
+                    print("\n  ✓ 企业微信通知已发送")
+                else:
+                    print("\n  ⚠ 企业微信通知发送失败")
+            except Exception as e:
+                print(f"\n  ⚠ 发送企业微信通知时出错: {e}")
+        elif config and not config.notification.enabled:
+            print("\n  ℹ 通知功能已禁用（本地测试模式）")
+        elif not config:
+            # 兼容旧版本：从环境变量读取
+            webhook_url = os.getenv('WECHAT_WEBHOOK_URL')
+            if webhook_url and md_file:
+                try:
+                    from notifiers import WeChatNotifier
+                    notifier = WeChatNotifier(webhook_url)
+                    success = notifier.send_report_summary(
+                        report_type="Zread",
+                        report_path=md_file,
+                        total_projects=len(trending_data),
+                        generate_time=template_data['generate_time']
+                    )
+                    if success:
+                        print("\n  ✓ 企业微信通知已发送")
+                    else:
+                        print("\n  ⚠ 企业微信通知发送失败")
+                except Exception as e:
+                    print(f"\n  ⚠ 发送企业微信通知时出错: {e}")
+            else:
+                print("\n  ℹ 未配置企业微信 Webhook URL，跳过推送")
         
     except Exception as e:
         print(f"错误: {e}")
         import traceback
         traceback.print_exc()
+
+
+async def main():
+    """Zread Trending 日报生成主函数（兼容旧版本）"""
+    await generate_zread_report()
 
 
 if __name__ == "__main__":

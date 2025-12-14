@@ -8,6 +8,7 @@ Trending 日报生成器 - 主控制器
 import asyncio
 import argparse
 import sys
+import os
 from datetime import datetime
 from pathlib import Path
 from playwright.async_api import async_playwright
@@ -19,6 +20,10 @@ from jinja2 import Environment, FileSystemLoader
 import schedule
 import time
 import threading
+
+# 导入配置和通知模块
+from config import load_config, Config
+from notifiers import WeChatNotifier
 
 # 导入原有的 zread 功能（延迟导入避免循环依赖）
 
@@ -122,8 +127,11 @@ async def fetch_github_trending():
         return html_content
 
 
-async def generate_github_report():
+async def generate_github_report(config: Config = None):
     """生成 GitHub Trending 日报"""
+    if config is None:
+        config = load_config()
+    
     try:
         # 获取页面内容
         html_content = await fetch_github_trending()
@@ -172,9 +180,9 @@ async def generate_github_report():
         # 关闭进度条
         pbar.close()
         
-        # 生成日报（同时生成 Markdown 和 HTML）
+        # 生成日报（根据配置生成指定格式）
         print("\n正在生成 GitHub Trending 日报...")
-        reports_dir = Path("reports")
+        reports_dir = Path(config.report.output_dir)
         reports_dir.mkdir(exist_ok=True)
         templates_dir = Path("templates")
         templates_dir.mkdir(exist_ok=True)
@@ -193,23 +201,45 @@ async def generate_github_report():
             'projects': trending_data
         }
         
-        # 生成 Markdown 格式
-        md_template = env.get_template("report.md.j2")
-        md_content = md_template.render(**template_data)
-        md_file = reports_dir / f"github_trending_report_{datetime.now().strftime('%Y%m%d')}.md"
-        with open(md_file, 'w', encoding='utf-8') as f:
-            f.write(md_content)
-        print(f"  ✓ Markdown 格式: {md_file}")
+        md_file = None
         
-        # 生成 HTML 格式
-        html_template = env.get_template("report.html.j2")
-        html_content = html_template.render(**template_data)
-        html_file = reports_dir / f"github_trending_report_{datetime.now().strftime('%Y%m%d')}.html"
-        with open(html_file, 'w', encoding='utf-8') as f:
-            f.write(html_content)
-        print(f"  ✓ HTML 格式: {html_file}")
+        # 根据配置生成报告格式
+        if 'markdown' in config.report.formats:
+            md_template = env.get_template("report.md.j2")
+            md_content = md_template.render(**template_data)
+            md_file = reports_dir / f"github_trending_report_{datetime.now().strftime('%Y%m%d')}.md"
+            with open(md_file, 'w', encoding='utf-8') as f:
+                f.write(md_content)
+            print(f"  ✓ Markdown 格式: {md_file}")
+        
+        if 'html' in config.report.formats:
+            html_template = env.get_template("report.html.j2")
+            html_content = html_template.render(**template_data)
+            html_file = reports_dir / f"github_trending_report_{datetime.now().strftime('%Y%m%d')}.html"
+            with open(html_file, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            print(f"  ✓ HTML 格式: {html_file}")
         
         print(f"\nGitHub Trending 日报已生成，共包含 {len(trending_data)} 个项目")
+        
+        # 发送通知（如果启用）
+        if config.notification.enabled and config.notification.wechat_webhook_url and md_file:
+            try:
+                notifier = WeChatNotifier(config.notification.wechat_webhook_url)
+                success = notifier.send_report_summary(
+                    report_type="GitHub",
+                    report_path=md_file,
+                    total_projects=len(trending_data),
+                    generate_time=template_data['generate_time']
+                )
+                if success:
+                    print("  ✓ 企业微信通知已发送")
+                else:
+                    print("  ⚠ 企业微信通知发送失败")
+            except Exception as e:
+                print(f"  ⚠ 发送企业微信通知时出错: {e}")
+        elif not config.notification.enabled:
+            print("  ℹ 通知功能已禁用（本地测试模式）")
         
     except Exception as e:
         print(f"生成 GitHub Trending 日报时出错: {e}")
@@ -217,12 +247,15 @@ async def generate_github_report():
         traceback.print_exc()
 
 
-async def generate_zread_report_wrapper():
+async def generate_zread_report_wrapper(config: Config = None):
     """Zread Trending 日报生成包装函数"""
+    if config is None:
+        config = load_config()
+    
     try:
         # 延迟导入避免循环依赖
-        from zread_trending_daily import main as zread_main
-        await zread_main()
+        from zread_trending_daily import generate_zread_report
+        await generate_zread_report(config)
     except Exception as e:
         print(f"生成 Zread Trending 日报时出错: {e}")
         import traceback
@@ -249,8 +282,7 @@ class TrendingScheduler:
             schedule.run_pending()
             time.sleep(60)  # 每分钟检查一次
     
-    def start(self, zread_enabled=True, github_enabled=True, 
-              zread_time="09:00", github_time="09:30"):
+    def start(self, config: Config):
         """启动定时任务"""
         if self.running:
             print("调度器已在运行中")
@@ -260,18 +292,18 @@ class TrendingScheduler:
         schedule.clear()
         
         # 添加 Zread 任务
-        if zread_enabled:
-            schedule.every().day.at(zread_time).do(
-                lambda: asyncio.run(generate_zread_report_wrapper())
+        if config.zread.enabled:
+            schedule.every().day.at(config.zread.time).do(
+                lambda: asyncio.run(generate_zread_report_wrapper(config))
             )
-            print(f"已设置 Zread Trending 日报定时任务: 每天 {zread_time}")
+            print(f"已设置 Zread Trending 日报定时任务: 每天 {config.zread.time}")
         
         # 添加 GitHub 任务
-        if github_enabled:
-            schedule.every().day.at(github_time).do(
-                lambda: asyncio.run(generate_github_report())
+        if config.github.enabled:
+            schedule.every().day.at(config.github.time).do(
+                lambda: asyncio.run(generate_github_report(config))
             )
-            print(f"已设置 GitHub Trending 日报定时任务: 每天 {github_time}")
+            print(f"已设置 GitHub Trending 日报定时任务: 每天 {config.github.time}")
         
         self.running = True
         self.thread = threading.Thread(target=self.run_scheduler, daemon=True)
@@ -289,7 +321,7 @@ class TrendingScheduler:
 
 
 def main():
-    """主函数 - 支持命令行参数"""
+    """主函数 - 支持命令行参数和配置文件"""
     parser = argparse.ArgumentParser(
         description='Trending 日报生成器 - 支持 Zread 和 GitHub',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -304,11 +336,17 @@ def main():
   # 同时生成两个日报
   python trending_daily.py --zread --github
   
-  # 启动定时任务（每天 9:00 生成 Zread，9:30 生成 GitHub）
-  python trending_daily.py --schedule
+  # 使用配置文件
+  python trending_daily.py --config config.json
   
-  # 自定义定时任务时间
-  python trending_daily.py --schedule --zread-time 08:00 --github-time 08:30
+  # 启动定时任务（使用配置文件）
+  python trending_daily.py --schedule --config config.json
+  
+  # 启用通知（覆盖配置）
+  python trending_daily.py --zread --notify
+  
+  # 禁用通知（覆盖配置）
+  python trending_daily.py --zread --no-notify
         """
     )
     
@@ -318,35 +356,64 @@ def main():
                        help='生成 GitHub Trending 日报')
     parser.add_argument('--schedule', action='store_true',
                        help='启动定时任务模式')
-    parser.add_argument('--zread-time', default='09:00',
-                       help='Zread 日报生成时间 (默认: 09:00)')
-    parser.add_argument('--github-time', default='09:30',
-                       help='GitHub 日报生成时间 (默认: 09:30)')
+    parser.add_argument('--config', type=str, default=None,
+                       help='配置文件路径（默认: config.json）')
+    parser.add_argument('--notify', action='store_true',
+                       help='启用通知（覆盖配置文件设置）')
+    parser.add_argument('--no-notify', action='store_true',
+                       help='禁用通知（覆盖配置文件设置）')
+    parser.add_argument('--zread-time', type=str, default=None,
+                       help='Zread 日报生成时间 (格式: HH:MM)')
+    parser.add_argument('--github-time', type=str, default=None,
+                       help='GitHub 日报生成时间 (格式: HH:MM)')
     parser.add_argument('--zread-only', action='store_true',
                        help='定时任务模式：仅启用 Zread')
     parser.add_argument('--github-only', action='store_true',
                        help='定时任务模式：仅启用 GitHub')
+    parser.add_argument('--formats', type=str, default=None,
+                       help='报告格式，逗号分隔 (例如: markdown,html)')
     
     args = parser.parse_args()
+    
+    # 加载配置
+    config = load_config(args.config)
+    
+    # 命令行参数覆盖配置
+    if args.notify:
+        config.notification.enabled = True
+    if args.no_notify:
+        config.notification.enabled = False
+    
+    if args.zread_time:
+        config.zread.time = args.zread_time
+    if args.github_time:
+        config.github.time = args.github_time
+    
+    if args.formats:
+        config.report.formats = [f.strip() for f in args.formats.split(',')]
     
     # 如果没有指定任何参数，显示帮助
     if not any([args.zread, args.github, args.schedule]):
         parser.print_help()
+        print("\n当前配置:")
+        print(f"  Zread: {'启用' if config.zread.enabled else '禁用'} ({config.zread.time})")
+        print(f"  GitHub: {'启用' if config.github.enabled else '禁用'} ({config.github.time})")
+        print(f"  报告格式: {', '.join(config.report.formats)}")
+        print(f"  通知: {'启用' if config.notification.enabled else '禁用'}")
         return
     
-    # 手动触发模式
+    # 定时任务模式
     if args.schedule:
-        # 定时任务模式
-        zread_enabled = not args.github_only
-        github_enabled = not args.zread_only
+        # 命令行参数覆盖配置
+        if args.zread_only:
+            config.zread.enabled = True
+            config.github.enabled = False
+        if args.github_only:
+            config.zread.enabled = False
+            config.github.enabled = True
         
         scheduler = TrendingScheduler()
-        scheduler.start(
-            zread_enabled=zread_enabled,
-            github_enabled=github_enabled,
-            zread_time=args.zread_time,
-            github_time=args.github_time
-        )
+        scheduler.start(config)
         
         try:
             # 保持主线程运行
@@ -359,17 +426,23 @@ def main():
         async def run_tasks():
             tasks = []
             
+            # 命令行参数覆盖配置
             if args.zread:
+                config.zread.enabled = True
+            if args.github:
+                config.github.enabled = True
+            
+            if config.zread.enabled and (args.zread or not args.github):
                 print("=" * 60)
                 print("开始生成 Zread Trending 日报")
                 print("=" * 60)
-                tasks.append(generate_zread_report_wrapper())
+                tasks.append(generate_zread_report_wrapper(config))
             
-            if args.github:
+            if config.github.enabled and (args.github or not args.zread):
                 print("=" * 60)
                 print("开始生成 GitHub Trending 日报")
                 print("=" * 60)
-                tasks.append(generate_github_report())
+                tasks.append(generate_github_report(config))
             
             if tasks:
                 await asyncio.gather(*tasks)

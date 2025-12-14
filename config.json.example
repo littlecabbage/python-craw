@@ -1,0 +1,19 @@
+{
+  "zread": {
+    "enabled": true,
+    "time": "09:00"
+  },
+  "github": {
+    "enabled": true,
+    "time": "09:30"
+  },
+  "report": {
+    "formats": ["markdown", "html"],
+    "output_dir": "reports"
+  },
+  "notification": {
+    "enabled": false,
+    "wechat_webhook_url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY"
+  }
+}
+
