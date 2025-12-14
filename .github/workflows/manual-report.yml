@@ -1,0 +1,99 @@
+name: 手动触发生成日报
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: '选择数据源'
+        required: true
+        type: choice
+        options:
+          - both
+          - zread
+          - github
+        default: 'both'
+      skip_commit:
+        description: '跳过提交到仓库'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  generate-reports:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      
+      - name: 安装依赖
+        run: |
+          uv sync
+      
+      - name: 安装 Playwright 浏览器
+        run: |
+          uv run playwright install chromium
+          uv run playwright install-deps chromium
+      
+      - name: 生成日报
+        run: |
+          case "${{ inputs.source }}" in
+            both)
+              uv run python trending_daily.py --zread --github
+              ;;
+            zread)
+              uv run python trending_daily.py --zread
+              ;;
+            github)
+              uv run python trending_daily.py --github
+              ;;
+          esac
+      
+      - name: 显示生成的报告列表
+        run: |
+          echo "## 生成的报告文件" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -d reports ]; then
+            echo "### 文件列表:" >> $GITHUB_STEP_SUMMARY
+            ls -lh reports/ | tail -n +2 | awk '{print "- " $9 " (" $5 ")"}' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "未找到 reports 目录" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: 上传生成的报告
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: manual-reports-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            reports/*.md
+            reports/*.html
+          retention-days: 7
+      
+      - name: 提交报告到仓库
+        if: success() && !inputs.skip_commit
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add reports/
+          if git diff --staged --quiet; then
+            echo "没有新文件需要提交"
+          else
+            git commit -m "手动生成日报: ${{ inputs.source }} - $(date +'%Y-%m-%d %H:%M:%S')"
+            git push
+          fi
+        continue-on-error: true
+

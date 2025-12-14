@@ -1,0 +1,37 @@
+# Zread Trending 日报
+生成时间: {{ generate_time }}
+
+## 本周热门项目 (共 {{ total_projects }} 个)
+
+{% for project in projects %}
+### {{ loop.index }}. {{ project.repo }}
+
+{% if project.intro %}
+**简介**: {{ project.intro }}
+{% elif project.description %}
+**简介**: {{ project.description }}
+{% endif %}
+
+{% if project.language %}
+**主要语言**: {{ project.language }}
+{% endif %}
+
+{% if project.highlights %}
+**亮点**:
+{% for highlight in project.highlights %}
+- {{ highlight }}
+{% endfor %}
+{% endif %}
+
+{% if project.tags %}
+**标签**: {{ project.tags[:10] | join(', ') }}
+{% endif %}
+
+{% if project.stars %}
+**Stars**: {{ project.stars }}
+{% endif %}
+
+**链接**: {{ project.url }}
+
+{% endfor %}
+

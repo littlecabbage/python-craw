@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ source }} Trending 日报</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+        
+        .header .meta {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .summary {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .summary h2 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        
+        .project {
+            background: #fff;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            padding: 25px;
+            margin-bottom: 25px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .project:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        
+        .project-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .project-number {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 15px;
+            flex-shrink: 0;
+        }
+        
+        .project-title {
+            flex: 1;
+        }
+        
+        .project-title h3 {
+            font-size: 1.4em;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+        
+        .project-title a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        
+        .project-title a:hover {
+            text-decoration: underline;
+        }
+        
+        .project-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .info-item {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 6px;
+        }
+        
+        .info-item strong {
+            color: #667eea;
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .info-item p, .info-item ul {
+            margin: 0;
+            color: #555;
+        }
+        
+        .highlights {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .highlights li {
+            padding: 8px 0;
+            padding-left: 20px;
+            position: relative;
+        }
+        
+        .highlights li:before {
+            content: "✨";
+            position: absolute;
+            left: 0;
+        }
+        
+        .tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .tag {
+            background: #e3f2fd;
+            color: #1976d2;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+        
+        .language-badge {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+        
+        .stars {
+            color: #f39c12;
+            font-weight: 600;
+        }
+        
+        .footer {
+            background: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+        }
+        
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.8em;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+            
+            .project-info {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>{{ source }} Trending 日报</h1>
+            <div class="meta">生成时间: {{ generate_time }}</div>
+        </div>
+        
+        <div class="content">
+            <div class="summary">
+                <h2>今日热门项目 (共 {{ total_projects }} 个)</h2>
+            </div>
+            
+            {% for project in projects %}
+            <div class="project">
+                <div class="project-header">
+                    <div class="project-number">{{ loop.index }}</div>
+                    <div class="project-title">
+                        <h3>
+                            <a href="{{ project.url }}" target="_blank">{{ project.repo }}</a>
+                        </h3>
+                    </div>
+                </div>
+                
+                <div class="project-info">
+                    {% if project.intro or project.description %}
+                    <div class="info-item">
+                        <strong>简介</strong>
+                        <p>{{ project.intro if project.intro else project.description }}</p>
+                    </div>
+                    {% endif %}
+                    
+                    {% if project.language %}
+                    <div class="info-item">
+                        <strong>主要语言</strong>
+                        <p><span class="language-badge">{{ project.language }}</span></p>
+                    </div>
+                    {% endif %}
+                    
+                    {% if project.highlights %}
+                    <div class="info-item">
+                        <strong>亮点</strong>
+                        <ul class="highlights">
+                            {% for highlight in project.highlights %}
+                            <li>{{ highlight }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                    
+                    {% if project.tags %}
+                    <div class="info-item">
+                        <strong>标签</strong>
+                        <div class="tags">
+                            {% for tag in project.tags[:10] %}
+                            <span class="tag">{{ tag }}</span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    
+                    {% if project.stars %}
+                    <div class="info-item">
+                        <strong>Stars</strong>
+                        <p class="stars">⭐ {{ project.stars }}</p>
+                    </div>
+                    {% endif %}
+                    
+                    {% if project.stars_today %}
+                    <div class="info-item">
+                        <strong>今日新增</strong>
+                        <p class="stars">📈 {{ project.stars_today }} stars today</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        
+        <div class="footer">
+            <p>Generated by Trending Daily Report Generator</p>
+        </div>
+    </div>
+</body>
+</html>
+

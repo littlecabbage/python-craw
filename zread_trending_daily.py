@@ -10,6 +10,9 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 from deep_translator import GoogleTranslator
+import requests
+from tqdm import tqdm
+from jinja2 import Environment, FileSystemLoader
 
 
 async def fetch_trending_content(browser=None):
@@ -52,73 +55,125 @@ def translate_to_chinese(text):
         return text  # 翻译失败时返回原文
 
 
-async def fetch_project_details(url, browser, semaphore):
-    """获取单个项目的详细信息（简介和亮点）"""
+async def fetch_project_details(repo_name, semaphore):
+    """从 GitHub 项目首页获取详细信息（简介、亮点和主要语言）
+    使用 requests 直接获取，更轻量快速，无需启动浏览器
+    """
     async with semaphore:  # 限制并发数
         try:
-            page = await browser.new_page()
-            page.set_default_timeout(30000)
+            # 构建 GitHub URL
+            github_url = f"https://github.com/{repo_name}"
             
-            await page.goto(url, wait_until="load", timeout=30000)
-            await asyncio.sleep(2)  # 等待页面渲染
+            # 使用 requests 直接获取页面内容（更轻量，无需浏览器）
+            # 使用 asyncio.to_thread 将同步请求转为异步，避免阻塞事件循环
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
             
-            content = await page.content()
-            await page.close()
+            def fetch_html():
+                response = requests.get(github_url, headers=headers, timeout=10)
+                response.raise_for_status()
+                return response.text
             
-            soup = BeautifulSoup(content, 'lxml')
+            html_content = await asyncio.to_thread(fetch_html)
+            soup = BeautifulSoup(html_content, 'lxml')
             
-            # 提取简介（通常在描述区域）
+            # 提取项目描述（在仓库标题下方）
             description = ""
-            highlights = []
-            
-            # 查找描述文本（通常在 main content 区域）
-            # 尝试多种选择器来找到描述
             desc_selectors = [
-                'main p',
-                'article p',
-                '[class*="description"]',
-                '[class*="intro"]',
-                '[class*="about"]',
+                'p[data-pjax="#repo-content-pjax-container"]',
+                'div[itemprop="about"]',
+                'p.f4.my-3',
+                'div.Box-body p',
+                'span[itemprop="about"]',
             ]
             
             for selector in desc_selectors:
                 desc_elements = soup.select(selector)
                 if desc_elements:
-                    # 取第一个较长的段落作为简介
                     for elem in desc_elements:
                         text = elem.get_text(strip=True)
-                        if len(text) > 50:  # 选择较长的文本作为简介
+                        if len(text) > 20:  # 选择有意义的描述
                             description = text[:500]  # 限制长度
                             break
                     if description:
                         break
             
-            # 提取亮点（通常在列表或特殊标记的区域）
-            highlight_selectors = [
-                'ul li',
-                'ol li',
-                '[class*="feature"]',
-                '[class*="highlight"]',
-                '[class*="benefit"]',
+            # 提取主要编程语言
+            language = ""
+            # GitHub 的语言信息通常在语言统计栏中，格式为 <li> 包含语言名和百分比
+            # 查找语言统计区域
+            lang_stats_container = soup.find('ul', class_=lambda x: x and 'list-style-none' in ' '.join(x) if x else False)
+            if not lang_stats_container:
+                # 尝试其他可能的容器
+                lang_stats_container = soup.find('div', class_=lambda x: x and 'language' in ' '.join(x).lower() if x else False)
+            
+            if lang_stats_container:
+                # 查找第一个语言项（通常是主要语言）
+                lang_items = lang_stats_container.find_all('li', limit=1)
+                if lang_items:
+                    # 提取语言名称（通常在 span 中，且不包含百分比）
+                    lang_spans = lang_items[0].find_all('span')
+                    for span in lang_spans:
+                        text = span.get_text(strip=True)
+                        # 排除百分比（包含 %）和空文本
+                        if text and '%' not in text and len(text) < 30:
+                            language = text
+                            break
+            
+            # 如果还没找到，尝试使用 itemprop 属性
+            if not language:
+                lang_elem = soup.find('span', itemprop='programmingLanguage')
+                if lang_elem:
+                    language = lang_elem.get_text(strip=True)
+            
+            # 如果还没找到，尝试从链接中提取
+            if not language:
+                lang_links = soup.find_all('a', href=lambda x: x and '/search' in x and 'l=' in x if x else False)
+                if lang_links:
+                    # 从第一个语言链接中提取语言名
+                    for link in lang_links[:1]:
+                        text = link.get_text(strip=True)
+                        if text and len(text) < 30:
+                            language = text
+                            break
+            
+            # 提取亮点：从 README 中提取关键信息
+            highlights = []
+            readme_selectors = [
+                'div#readme',
+                'article.markdown-body',
+                'div[data-target="readme-toc.content"]',
             ]
             
-            for selector in highlight_selectors:
-                highlight_elements = soup.select(selector)
-                if highlight_elements:
-                    for elem in highlight_elements[:5]:  # 最多取5个亮点
-                        text = elem.get_text(strip=True)
-                        if len(text) > 20 and len(text) < 200:  # 合理的长度
-                            highlights.append(text)
+            for selector in readme_selectors:
+                readme_elem = soup.select_one(selector)
+                if readme_elem:
+                    # 从 README 中提取列表项、粗体文本或标题作为亮点
+                    # 查找列表项（通常是特性列表）
+                    list_items = readme_elem.find_all(['li', 'strong', 'b'])
+                    for item in list_items[:10]:  # 最多检查前10个
+                        text = item.get_text(strip=True)
+                        # 过滤掉太短或太长的文本
+                        if 15 < len(text) < 200:
+                            # 检查是否是列表项的开头（通常包含特性描述）
+                            if item.name == 'li' or (item.name in ['strong', 'b'] and len(text) > 20):
+                                if text not in highlights:
+                                    highlights.append(text)
+                                    if len(highlights) >= 5:  # 最多5个亮点
+                                        break
                     if highlights:
                         break
-            
-            # 如果没有找到亮点，尝试从标题或强调文本中提取
-            if not highlights:
-                strong_elements = soup.find_all(['strong', 'b', 'h2', 'h3'])
-                for elem in strong_elements[:5]:
-                    text = elem.get_text(strip=True)
-                    if len(text) > 10 and len(text) < 150:
-                        highlights.append(text)
+                    
+                    # 如果没有找到列表项，尝试从标题中提取
+                    if not highlights:
+                        headings = readme_elem.find_all(['h2', 'h3'])
+                        for heading in headings[:5]:
+                            text = heading.get_text(strip=True)
+                            if 10 < len(text) < 100:
+                                highlights.append(text)
+                                if len(highlights) >= 5:
+                                    break
             
             # 翻译简介和亮点为中文
             translated_description = ''
@@ -133,13 +188,15 @@ async def fetch_project_details(url, browser, semaphore):
             
             return {
                 'description': translated_description,
-                'highlights': translated_highlights
+                'highlights': translated_highlights,
+                'language': language
             }
         except Exception as e:
-            print(f"  获取 {url} 详情失败: {e}")
+            print(f"  获取 {repo_name} 详情失败: {e}")
             return {
                 'description': '',
-                'highlights': []
+                'highlights': [],
+                'language': ''
             }
 
 
@@ -288,48 +345,106 @@ def parse_trending_data(html_content):
     return unique_data
 
 
-def generate_daily_report(trending_data, output_file=None):
-    """生成日报"""
+def generate_daily_report(trending_data, output_file=None, format='markdown', source='Zread'):
+    """使用 Jinja2 模板生成日报
+    
+    Args:
+        trending_data: 项目数据列表
+        output_file: 输出文件路径（可选）
+        format: 输出格式，'markdown' 或 'html'（默认: 'markdown'）
+        source: 数据源名称（默认: 'Zread'）
+    """
+    # 创建 reports 文件夹（如果不存在）
+    reports_dir = Path("reports")
+    reports_dir.mkdir(exist_ok=True)
+    
+    # 创建 templates 文件夹（如果不存在）
+    templates_dir = Path("templates")
+    templates_dir.mkdir(exist_ok=True)
+    
+    # 根据格式确定文件扩展名和模板文件名
+    if format == 'html':
+        ext = '.html'
+        template_name = "report.html.j2"
+    else:
+        ext = '.md'
+        template_name = "report.md.j2"
+    
     if output_file is None:
-        output_file = Path(f"zread_trending_report_{datetime.now().strftime('%Y%m%d')}.md")
+        filename = f"{source.lower()}_trending_report_{datetime.now().strftime('%Y%m%d')}{ext}"
+        output_file = reports_dir / filename
+    else:
+        # 如果提供了 output_file，确保它是 Path 对象且在 reports 目录下
+        if isinstance(output_file, str):
+            output_file = Path(output_file)
+        if not output_file.is_absolute():
+            output_file = reports_dir / output_file
     
-    report_lines = [
-        "# Zread Trending 日报",
-        f"生成时间: {datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}",
-        "",
-        f"## 本周热门项目 (共 {len(trending_data)} 个)",
-        ""
-    ]
+    # 加载 Jinja2 模板
+    template_path = templates_dir / template_name
     
-    for idx, project in enumerate(trending_data, 1):
-        report_lines.append(f"### {idx}. {project['repo']}")
-        
-        # 简介
-        if project.get('intro'):
-            report_lines.append(f"**简介**: {project['intro']}")
-        elif project.get('description'):
-            report_lines.append(f"**简介**: {project['description']}")
-        
-        # 亮点
-        if project.get('highlights'):
-            report_lines.append("**亮点**:")
-            for highlight in project['highlights']:
-                report_lines.append(f"- {highlight}")
-        
-        # 标签
-        if project.get('tags'):
-            tags_str = ', '.join(project['tags'][:10])  # 限制标签数量
-            report_lines.append(f"**标签**: {tags_str}")
-        
-        # Stars
-        if project.get('stars'):
-            report_lines.append(f"**Stars**: {project['stars']}")
-        
-        # 链接
-        report_lines.append(f"**链接**: {project['url']}")
-        report_lines.append("")
+    # 如果模板文件不存在，创建一个默认模板
+    if not template_path.exists():
+        default_template = """# Zread Trending 日报
+生成时间: {{ generate_time }}
+
+## 本周热门项目 (共 {{ total_projects }} 个)
+
+{% for project in projects %}
+### {{ loop.index }}. {{ project.repo }}
+
+{% if project.intro %}
+**简介**: {{ project.intro }}
+{% elif project.description %}
+**简介**: {{ project.description }}
+{% endif %}
+
+{% if project.language %}
+**主要语言**: {{ project.language }}
+{% endif %}
+
+{% if project.highlights %}
+**亮点**:
+{% for highlight in project.highlights %}
+- {{ highlight }}
+{% endfor %}
+{% endif %}
+
+{% if project.tags %}
+**标签**: {{ project.tags[:10] | join(', ') }}
+{% endif %}
+
+{% if project.stars %}
+**Stars**: {{ project.stars }}
+{% endif %}
+
+**链接**: {{ project.url }}
+
+{% endfor %}
+"""
+        with open(template_path, 'w', encoding='utf-8') as f:
+            f.write(default_template)
     
-    report_content = '\n'.join(report_lines)
+    # 设置 Jinja2 环境
+    env = Environment(
+        loader=FileSystemLoader(str(templates_dir)),
+        trim_blocks=True,
+        lstrip_blocks=True
+    )
+    
+    # 加载模板
+    template = env.get_template("report.md.j2")
+    
+    # 准备模板数据
+    template_data = {
+        'source': source,
+        'generate_time': datetime.now().strftime('%Y年%m月%d日 %H:%M:%S'),
+        'total_projects': len(trending_data),
+        'projects': trending_data
+    }
+    
+    # 渲染模板
+    report_content = template.render(**template_data)
     
     # 保存到文件
     with open(output_file, 'w', encoding='utf-8') as f:
@@ -342,7 +457,7 @@ def generate_daily_report(trending_data, output_file=None):
 
 
 async def main():
-    """主函数"""
+    """Zread Trending 日报生成主函数（可被导入）"""
     try:
         # 初始化浏览器
         async with async_playwright() as p:
@@ -386,34 +501,85 @@ async def main():
                 return
             
             # 获取项目详情（简介和亮点）
-            print(f"\n正在获取 {min(len(trending_data), 20)} 个项目的详细信息...")
-            print("这可能需要一些时间，请耐心等待...")
+            projects_to_fetch = trending_data[:20]  # 限制前20个项目，避免耗时过长
+            total_projects = len(projects_to_fetch)
+            print(f"\n正在获取 {total_projects} 个项目的详细信息...")
             
             # 使用信号量限制并发数，避免过载
             semaphore = asyncio.Semaphore(3)  # 最多3个并发请求
             
-            # 创建任务列表
-            tasks = []
-            for project in trending_data[:20]:  # 限制前20个项目，避免耗时过长
-                task = fetch_project_details(project['url'], browser, semaphore)
-                tasks.append((project, task))
+            # 创建进度条
+            pbar = tqdm(total=total_projects, desc="获取项目详情", unit="项目", ncols=100, leave=True)
             
-            # 并发获取详情
-            for project, task in tasks:
+            # 创建包装函数，用于更新进度条
+            async def fetch_with_progress(project):
+                """获取项目详情并更新进度条"""
                 try:
-                    details = await task
+                    details = await fetch_project_details(project['repo'], semaphore)
                     project['intro'] = details['description']
                     project['highlights'] = details['highlights']
-                    print(f"  ✓ {project['repo']}")
+                    if details.get('language'):
+                        project['language'] = details['language']
+                    pbar.set_postfix_str(f"✓ {project['repo']}")
+                    return True
                 except Exception as e:
-                    print(f"  ✗ {project['repo']}: {e}")
+                    pbar.set_postfix_str(f"✗ {project['repo']}: {str(e)[:30]}")
+                    return False
+                finally:
+                    pbar.update(1)
+            
+            # 创建所有任务
+            tasks = [
+                fetch_with_progress(project)
+                for project in projects_to_fetch
+            ]
+            
+            # 并发执行所有任务
+            await asyncio.gather(*tasks)
+            
+            # 关闭进度条
+            pbar.close()
             
             # 关闭浏览器
             await browser.close()
         
-        # 生成日报（在浏览器关闭后）
+        # 生成日报（在浏览器关闭后，同时生成 Markdown 和 HTML）
         print("\n正在生成日报...")
-        report_content = generate_daily_report(trending_data)
+        reports_dir = Path("reports")
+        templates_dir = Path("templates")
+        templates_dir.mkdir(exist_ok=True)
+        
+        # 设置 Jinja2 环境
+        env = Environment(
+            loader=FileSystemLoader(str(templates_dir)),
+            trim_blocks=True,
+            lstrip_blocks=True
+        )
+        
+        template_data = {
+            'source': 'Zread',
+            'generate_time': datetime.now().strftime('%Y年%m月%d日 %H:%M:%S'),
+            'total_projects': len(trending_data),
+            'projects': trending_data
+        }
+        
+        # 生成 Markdown 格式
+        md_template = env.get_template("report.md.j2")
+        md_content = md_template.render(**template_data)
+        md_file = reports_dir / f"zread_trending_report_{datetime.now().strftime('%Y%m%d')}.md"
+        with open(md_file, 'w', encoding='utf-8') as f:
+            f.write(md_content)
+        print(f"  ✓ Markdown 格式: {md_file}")
+        
+        # 生成 HTML 格式
+        html_template = env.get_template("report.html.j2")
+        html_content = html_template.render(**template_data)
+        html_file = reports_dir / f"zread_trending_report_{datetime.now().strftime('%Y%m%d')}.html"
+        with open(html_file, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        print(f"  ✓ HTML 格式: {html_file}")
+        
+        report_content = md_content
         
         # 打印摘要
         print("\n" + "="*50)
