@@ -50,8 +50,12 @@ jobs:
       
       - name: 生成日报
         env:
-          WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
-          NOTIFICATION_ENABLED: ${{ secrets.WECHAT_WEBHOOK_URL != '' && 'true' || 'false' }}
+          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
+          NOTIFICATION_ENABLED: ${{ secrets.EMAIL_RECIPIENT != '' && 'true' || 'false' }}
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: |
           case "${{ inputs.source }}" in
             both)
