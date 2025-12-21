@@ -62,3 +62,5 @@ chmod +x scripts/configure_github_secret.sh
 ./scripts/configure_github_secret.sh YOUR_GITHUB_TOKEN
 ```
 
+
+

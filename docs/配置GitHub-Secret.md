@@ -1,6 +1,6 @@
 # 配置 GitHub Secret 指南
 
-本指南将帮助您在 GitHub 仓库中配置企业微信 Webhook URL，以启用自动推送功能。
+本指南将帮助您在 GitHub 仓库中配置邮件通知相关的 Secrets，以启用自动邮件推送功能。
 
 ## 方法一：使用 GitHub Web UI（推荐）
 
@@ -16,14 +16,25 @@
    - 在左侧菜单中找到 "Secrets and variables"
    - 点击 "Actions"
 
-3. **添加新的 Secret**
-   - 点击 "New repository secret" 按钮
-   - Name: `WECHAT_WEBHOOK_URL`
-   - Secret: `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=a4d6c016-45aa-4356-b7fe-9d12b3525de0`
-   - 点击 "Add secret"
+3. **添加邮件通知相关的 Secrets**
+   - 点击 "New repository secret" 按钮，依次添加以下 Secrets：
+   
+   **必需：**
+   - Name: `EMAIL_RECIPIENT`
+     - Secret: `zengzihui3@huawei.com`（收件人邮箱地址）
+   
+   **可选（如果使用需要认证的 SMTP 服务器）：**
+   - Name: `SMTP_SERVER`
+     - Secret: `smtp.example.com`（SMTP 服务器地址，如 smtp.gmail.com）
+   - Name: `SMTP_PORT`
+     - Secret: `587`（SMTP 端口，通常为 587 或 465）
+   - Name: `SMTP_USER`
+     - Secret: `your-email@example.com`（SMTP 用户名，通常是发件人邮箱）
+   - Name: `SMTP_PASSWORD`
+     - Secret: `your-password`（SMTP 密码或应用专用密码）
 
 4. **验证配置**
-   - 确认 Secret 已成功创建
+   - 确认所有 Secrets 已成功创建
    - 现在可以手动触发工作流测试
 
 ### 测试配置
@@ -33,7 +44,7 @@
 3. 点击 "Run workflow"
 4. 选择数据源（如 "both"）
 5. 点击 "Run workflow" 执行
-6. 检查企业微信群是否收到通知
+6. 检查邮箱是否收到通知邮件
 
 ## 方法二：使用 GitHub CLI
 
@@ -62,11 +73,29 @@ sudo dnf install gh
    gh auth login
    ```
 
-2. **创建 Secret**
+2. **创建 Secrets**
    ```bash
-   gh secret set WECHAT_WEBHOOK_URL \
+   # 必需：收件人邮箱
+   gh secret set EMAIL_RECIPIENT \
      --repo littlecabbage/python-craw \
-     --body "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=a4d6c016-45aa-4356-b7fe-9d12b3525de0"
+     --body "zengzihui3@huawei.com"
+   
+   # 可选：SMTP 配置（如果使用需要认证的 SMTP 服务器）
+   gh secret set SMTP_SERVER \
+     --repo littlecabbage/python-craw \
+     --body "smtp.example.com"
+   
+   gh secret set SMTP_PORT \
+     --repo littlecabbage/python-craw \
+     --body "587"
+   
+   gh secret set SMTP_USER \
+     --repo littlecabbage/python-craw \
+     --body "your-email@example.com"
+   
+   gh secret set SMTP_PASSWORD \
+     --repo littlecabbage/python-craw \
+     --body "your-password"
    ```
 
 3. **验证配置**
@@ -179,10 +208,11 @@ chmod +x scripts/configure_github_secret.sh
 
 ### 问题：工作流中未收到通知
 
-- 检查 Secret 名称是否为 `WECHAT_WEBHOOK_URL`
-- 检查 Webhook URL 是否正确
+- 检查 Secret 名称是否为 `EMAIL_RECIPIENT`
+- 检查收件人邮箱地址是否正确
 - 查看工作流日志中的错误信息
-- 确认企业微信 Webhook 是否有效
+- 确认 SMTP 服务器配置是否正确（如果使用需要认证的 SMTP）
+- 检查邮箱的垃圾邮件文件夹
 
 ### 问题：加密失败
 
@@ -201,9 +231,10 @@ chmod +x scripts/configure_github_secret.sh
 3. **限制 Token 权限**
    - 只授予必要的权限（repo）
 
-4. **保护 Webhook URL**
-   - Webhook URL 包含密钥，不要泄露
-   - 如果泄露，立即在企业微信中重新生成
+4. **保护邮件配置**
+   - SMTP 密码应该使用应用专用密码（如 Gmail）
+   - 不要将密码提交到仓库
+   - 定期轮换密码
 
 ## 相关链接
 

@@ -23,7 +23,7 @@ import threading
 
 # 导入配置和通知模块
 from config import load_config, Config
-from notifiers import WeChatNotifier
+from notifiers import EmailNotifier
 
 # 导入原有的 zread 功能（延迟导入避免循环依赖）
 
@@ -223,9 +223,9 @@ async def generate_github_report(config: Config = None):
         print(f"\nGitHub Trending 日报已生成，共包含 {len(trending_data)} 个项目")
         
         # 发送通知（如果启用）
-        if config.notification.enabled and config.notification.wechat_webhook_url and md_file:
+        if config.notification.enabled and config.notification.email_recipient and md_file:
             try:
-                notifier = WeChatNotifier(config.notification.wechat_webhook_url)
+                notifier = EmailNotifier(recipient=config.notification.email_recipient)
                 success = notifier.send_report_summary(
                     report_type="GitHub",
                     report_path=md_file,
@@ -233,11 +233,11 @@ async def generate_github_report(config: Config = None):
                     generate_time=template_data['generate_time']
                 )
                 if success:
-                    print("  ✓ 企业微信通知已发送")
+                    print(f"  ✓ 邮件通知已发送到 {config.notification.email_recipient}")
                 else:
-                    print("  ⚠ 企业微信通知发送失败")
+                    print("  ⚠ 邮件通知发送失败")
             except Exception as e:
-                print(f"  ⚠ 发送企业微信通知时出错: {e}")
+                print(f"  ⚠ 发送邮件通知时出错: {e}")
         elif not config.notification.enabled:
             print("  ℹ 通知功能已禁用（本地测试模式）")
         

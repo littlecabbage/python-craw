@@ -16,6 +16,7 @@ class NotificationConfig:
     """通知配置"""
     enabled: bool = False  # 是否启用通知
     wechat_webhook_url: Optional[str] = None  # 企业微信 Webhook URL
+    email_recipient: Optional[str] = None  # 邮件收件人地址
 
 
 @dataclass
@@ -85,7 +86,8 @@ def get_default_config() -> Config:
         ),
         notification=NotificationConfig(
             enabled=False,  # 默认不发送通知（本地测试模式）
-            wechat_webhook_url=None
+            wechat_webhook_url=None,
+            email_recipient=None
         )
     )
 
@@ -137,6 +139,11 @@ def load_config(config_path: Optional[str] = None) -> Config:
         config.notification.wechat_webhook_url = os.getenv('WECHAT_WEBHOOK_URL')
         # 如果提供了 Webhook URL，默认启用通知（除非明确禁用）
         if config.notification.wechat_webhook_url and os.getenv('NOTIFICATION_ENABLED') is None:
+            config.notification.enabled = True
+    if os.getenv('EMAIL_RECIPIENT'):
+        config.notification.email_recipient = os.getenv('EMAIL_RECIPIENT')
+        # 如果提供了邮件收件人，默认启用通知（除非明确禁用）
+        if config.notification.email_recipient and os.getenv('NOTIFICATION_ENABLED') is None:
             config.notification.enabled = True
     
     # 报告格式

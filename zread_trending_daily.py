@@ -19,12 +19,12 @@ from typing import Optional
 # 导入配置和通知模块
 try:
     from config import Config, load_config
-    from notifiers import WeChatNotifier
+    from notifiers import EmailNotifier
 except ImportError:
     # 兼容旧版本
     Config = None
     load_config = None
-    WeChatNotifier = None
+    EmailNotifier = None
 
 
 async def fetch_trending_content(browser=None):
@@ -624,9 +624,9 @@ async def generate_zread_report(config: Optional[Config] = None):
             print(report_content[:500] + "..." if len(report_content) > 500 else report_content)
         
         # 发送通知（如果启用）
-        if config and config.notification.enabled and config.notification.wechat_webhook_url and md_file:
+        if config and config.notification.enabled and config.notification.email_recipient and md_file:
             try:
-                notifier = WeChatNotifier(config.notification.wechat_webhook_url)
+                notifier = EmailNotifier(recipient=config.notification.email_recipient)
                 success = notifier.send_report_summary(
                     report_type="Zread",
                     report_path=md_file,
@@ -634,20 +634,20 @@ async def generate_zread_report(config: Optional[Config] = None):
                     generate_time=template_data['generate_time']
                 )
                 if success:
-                    print("\n  ✓ 企业微信通知已发送")
+                    print(f"\n  ✓ 邮件通知已发送到 {config.notification.email_recipient}")
                 else:
-                    print("\n  ⚠ 企业微信通知发送失败")
+                    print("\n  ⚠ 邮件通知发送失败")
             except Exception as e:
-                print(f"\n  ⚠ 发送企业微信通知时出错: {e}")
+                print(f"\n  ⚠ 发送邮件通知时出错: {e}")
         elif config and not config.notification.enabled:
             print("\n  ℹ 通知功能已禁用（本地测试模式）")
         elif not config:
             # 兼容旧版本：从环境变量读取
-            webhook_url = os.getenv('WECHAT_WEBHOOK_URL')
-            if webhook_url and md_file:
+            email_recipient = os.getenv('EMAIL_RECIPIENT')
+            if email_recipient and md_file:
                 try:
-                    from notifiers import WeChatNotifier
-                    notifier = WeChatNotifier(webhook_url)
+                    from notifiers import EmailNotifier
+                    notifier = EmailNotifier(recipient=email_recipient)
                     success = notifier.send_report_summary(
                         report_type="Zread",
                         report_path=md_file,
@@ -655,11 +655,11 @@ async def generate_zread_report(config: Optional[Config] = None):
                         generate_time=template_data['generate_time']
                     )
                     if success:
-                        print("\n  ✓ 企业微信通知已发送")
+                        print(f"\n  ✓ 邮件通知已发送到 {email_recipient}")
                     else:
-                        print("\n  ⚠ 企业微信通知发送失败")
+                        print("\n  ⚠ 邮件通知发送失败")
                 except Exception as e:
-                    print(f"\n  ⚠ 发送企业微信通知时出错: {e}")
+                    print(f"\n  ⚠ 发送邮件通知时出错: {e}")
             else:
                 print("\n  ℹ 未配置企业微信 Webhook URL，跳过推送")
         
