@@ -52,8 +52,9 @@ jobs:
         env:
           EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
           NOTIFICATION_ENABLED: ${{ secrets.EMAIL_RECIPIENT != '' && 'true' || 'false' }}
-          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          # 默认使用 126 邮箱 SMTP，若在 Secrets 中提供值则以 Secrets 为准
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER != '' && secrets.SMTP_SERVER || 'smtp.126.com' }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT != '' && secrets.SMTP_PORT || '465' }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: |
